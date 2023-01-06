@@ -11,23 +11,22 @@ import (
 	"net/url"
 	_ "time"
 	"github.com/gorilla/mux"
-	"html"
+	
 	"html/template"
 	_ "context"
 	"strconv"
-	
-	"github.com/gocolly/colly"
+	"encoding/json"
 	
 
 )
 
 var m MembersOfParliament
 //var memberMap map[string][]string
-const bingURL = "https://api.cognitive.microsoft.com/bing/v7.0/search"
+const mozURL = "https://api.moz.com/linkscape/url-metrics/"
 
 func main() {
 	//memberMap = make(map[string][]string)
-
+	
 	router := mux.NewRouter()
 	router.HandleFunc("/", indexHandler)
 	router.HandleFunc("/sa", func (w http.ResponseWriter, r *http.Request) {
@@ -37,6 +36,7 @@ func main() {
 			return
 		}
 		id ,err := strconv.Atoi(memberId[0])
+		
 		if err != nil {
 			log.Println("Url Param 'memberId' is not a number")
 			return
@@ -55,13 +55,16 @@ func main() {
 	xml.Unmarshal(respBytes, &m)
 	resp.Body.Close()
 	log.Println("Response recorded.")
-	http.ListenAndServe(":8080", router)
-
-
+	
 	for _, member := range m.Members {
+		fmt.Println("Processing member:", member.Id)
 		go literaturePopulator(member.Id, m.Members)
 	}
 
+
+
+
+	http.ListenAndServe(":8080", router)
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
@@ -108,17 +111,42 @@ func literaturePopulator(id int, members []Member) {
 			break
 		}
 	}
-	query := fmt.Sprintf("%s %s site:news.google.com", member.Fullname, member.Party)
-	searchURL := fmt.Sprintf("https://opensearch.org/search?q=%s", url.QueryEscape(query))
-	c := colly.NewCollector()
-	c.OnHTML("h3", func(e *colly.HTMLElement) {
+	
+	// Build the search query
+	query := url.QueryEscape(member.Fullname + " " + member.Party)
+	searchURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&pretty=1", query)
+	
+	// Send the request
+	resp, err := http.Get(searchURL)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer resp.Body.Close()
+	
+	// Parse the response
+	var data struct {
+		RelatedTopics []struct {
+			Text string `json:"Text"`
+			FirstURL string `json:"FirstURL"`
+		} `json:"RelatedTopics"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		log.Println(err)
+		return
+	}
+	
+	// Populate the Results field
+	for _, topic := range data.RelatedTopics {
 		member.Results = append(member.Results, Result{
-			Headline: e.Text,
-			Link:     e.Attr("href"),
+			Headline: topic.Text,
+			Link: topic.FirstURL,
 		})
-	})
-	c.Visit(searchURL)
+	}
+	fmt.Println(members[5].Results)
 }
+
+
 
 
 
