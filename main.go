@@ -1,7 +1,7 @@
 package main
 
 import (
-	"html"
+	
 	"encoding/xml"
 	
 	"fmt"
@@ -11,10 +11,12 @@ import (
 	"net/url"
 	_ "time"
 	"github.com/gorilla/mux"
+	"html"
 	"html/template"
 	_ "context"
 	"strconv"
 	
+	"github.com/gocolly/colly"
 	
 
 )
@@ -99,56 +101,23 @@ func sentimentAnalysisHandler(w http.ResponseWriter, r *http.Request, memberId i
 	fmt.Printf("Selected member ID: %v", member)
 }
 func literaturePopulator(id int, members []Member) {
-	// Build the search query
-	query := url.QueryEscape(fmt.Sprintf("%s %s", members[id-1].Fullname, members[id-1].Party))
-
-	// Send the search request to OpenSearch
-	resp, err := http.Get(fmt.Sprintf("https://opensearch.org/search?q=%s", query))
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	defer resp.Body.Close()
-
-	// Parse the search results
-	doc, err := html.Parse(resp.Body)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	
-	// Find the search results in the page
-	results := []Result{}
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "h2" && n.Parent.Data == "li" {
-			// This is a search result headline
-			for _, a := range n.Attr {
-				if a.Key == "class" && a.Val == "title" {
-					// This is the link element for the search result
-					for _, a := range n.FirstChild.Attr {
-						if a.Key == "href" {
-							// Add the search result to the results slice
-							results = append(results, Result{
-								Headline: n.FirstChild.FirstChild.Data,
-								Link:     a.Val,
-								Content:  "",
-							})
-							break
-						}
-					}
-					break
-				}
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f(c)
+	var member Member
+	for _, m := range members {
+		if m.Id == id {
+			member = m
+			break
 		}
 	}
-	f(doc)
-
-	// Set the Results field for the member
-	members[id-1].Results = results
+	query := fmt.Sprintf("%s %s site:news.google.com", member.Fullname, member.Party)
+	searchURL := fmt.Sprintf("https://opensearch.org/search?q=%s", url.QueryEscape(query))
+	c := colly.NewCollector()
+	c.OnHTML("h3", func(e *colly.HTMLElement) {
+		member.Results = append(member.Results, Result{
+			Headline: e.Text,
+			Link:     e.Attr("href"),
+		})
+	})
+	c.Visit(searchURL)
 }
 
 
